@@ -9,8 +9,7 @@
 - **Field-Level Expiration**: Set expiration times on individual fields within a Redis hash.
 - **Custom Expiration Units**: Support for specifying expiration times in seconds (`s`) or milliseconds (`ms`).
 - **Expiration Override**: Ability to update or override the expiration time for a specific field.
-- **Independent Expirations**: Expirations set by `EXPIREMEMBER` are not invalidated by interacting with hash key values using other commands.
-- **Manual Hash Member Removal**: If you manually delete a hash member using `HDEL`, you must also set its `expiremember` to `0` to properly manage its expiration state.
+- **Expiring runs in a separate thread**: The module has been designed to have minimal impact on Redis server's performance and locks Redis's main thread only for actual Redis key delete operations.
 
 ## Key Differences from KeyDB's EXPIREMEMBER
 
