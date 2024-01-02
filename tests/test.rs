@@ -183,4 +183,43 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_expiremember_expiry_zero_deletes_immediately() -> RedisResult<()> {
+        let client = redis::Client::open("redis://127.0.0.1:34123/")?;
+        let mut con = client.get_connection()?;
+
+        // Set a field in a hash
+        let _: () = redis::cmd("HSET")
+            .arg("myhash5")
+            .arg("field")
+            .arg("value")
+            .query(&mut con)?;
+
+        // Initially set the expiration to a non-zero value
+        let _: () = redis::cmd("EXPIREMEMBER")
+            .arg("myhash5")
+            .arg("field")
+            .arg(5)
+            .query(&mut con)?;
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        // Reset the expiration to 0, effectively deleting the field
+        let _: () = redis::cmd("EXPIREMEMBER")
+            .arg("myhash5")
+            .arg("field")
+            .arg(0)
+            .query(&mut con)?;
+
+        // Check if the field is deleted immediately
+        let exists: u8 = redis::cmd("HEXISTS")
+            .arg("myhash5")
+            .arg("field")
+            .query(&mut con)?;
+
+        assert!(exists == 0, "The field should be deleted immediately after setting expiration to 0");
+
+        Ok(())
+    }
 }

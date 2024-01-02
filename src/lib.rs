@@ -1,18 +1,19 @@
 use crossbeam::queue::ArrayQueue;
 use lazy_static::lazy_static;
 
+
 use redis_module::{
-    redis_module, Context, RedisError, RedisResult, RedisString, RedisValue, ThreadSafeContext, KeyType,
+    redis_module, raw as rawmod, Context, RedisError, RedisResult, RedisString, RedisValue, ThreadSafeContext, KeyType, Status, RedisModuleIO,
 };
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use std::collections::{BinaryHeap, HashMap};
 use std::cmp::Reverse;
 
 #[derive(Clone, Eq, PartialEq)]
 struct ExpiringMember {
-    expire_at: Instant,
+    expire_at: SystemTime,
     key: String,
     member: String,
 }
@@ -51,7 +52,7 @@ impl ExpirationQueue {
 
 lazy_static! {
     static ref EXPIRATION_QUEUE: Arc<ExpirationQueue> = Arc::new(ExpirationQueue::new(10000));
-    static ref EXPIRATION_TIMES: Mutex<HashMap<String, Instant>> = Mutex::new(HashMap::new());
+    static ref EXPIRATION_TIMES: Mutex<HashMap<String, SystemTime>> = Mutex::new(HashMap::new());
     static ref THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 }
 
@@ -67,8 +68,8 @@ fn expiremember(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let unit = if args.len() == 5 { args[4].to_string().to_lowercase() } else { "s".to_string() };
 
     let expire_at = match unit.as_str() {
-        "s" => Instant::now() + Duration::from_secs(expire_value as u64),
-        "ms" => Instant::now() + Duration::from_millis(expire_value as u64),
+        "s" => SystemTime::now() + Duration::from_secs(expire_value as u64),
+        "ms" => SystemTime::now() + Duration::from_millis(expire_value as u64),
         _ => return Err(RedisError::Str("ERR invalid time unit for 'expiremember' command")),
     };
 
@@ -108,20 +109,28 @@ fn start_expiration_thread() {
     thread::spawn(move || {
         let thread_ctx = ThreadSafeContext::new();
         let mut heap = BinaryHeap::new();
+        let mut members_to_expire = HashMap::new();
         loop {
+            thread::sleep(Duration::from_millis(100));
+            let mut has_data = false;
             while let Some(member) = EXPIRATION_QUEUE.try_pop() {
                 heap.push(Reverse(member));
+                has_data = true;
+            }
+            if ! has_data {
+                continue;
             }
 
-            let now = Instant::now();
-            let mut members_to_expire = HashMap::new();
+            let now = SystemTime::now();
             let mut expiration_times = EXPIRATION_TIMES.lock().unwrap();
 
             while let Some(Reverse(member)) = heap.peek() {
                 if member.expire_at > now {
                     break;
                 }
+
                 if let Some(&expiration_time) = expiration_times.get(&(member.key.clone() + &member.member)) {
+                    // the below will be false if the expiration for a field was overridden
                     if expiration_time == member.expire_at {
                         members_to_expire.entry(member.key.clone())
                                          .or_insert_with(Vec::new)
@@ -135,7 +144,7 @@ fn start_expiration_thread() {
 
             if !members_to_expire.is_empty() {
                 let ctx: redis_module::ContextGuard = thread_ctx.lock();
-                for (key, members) in members_to_expire {
+                for (key, members) in &members_to_expire {
                     let redis_string_key = ctx.create_string(key.as_bytes());
                     let key = ctx.open_key_writable(&redis_string_key);
                     if key.key_type() == KeyType::Hash {
@@ -146,8 +155,6 @@ fn start_expiration_thread() {
                 }
                 drop(ctx);
             }
-
-            thread::sleep(Duration::from_millis(500));
         }
     });
 }
@@ -163,4 +170,3 @@ redis_module! {
         ["expiremember", expiremember, "", 0, 0, 0],
     ],
 }
-
