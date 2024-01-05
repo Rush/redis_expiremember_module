@@ -222,4 +222,98 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_expiremember_set_functionality() -> RedisResult<()> {
+        let client = redis::Client::open("redis://127.0.0.1:34123/")?;
+        let mut con = client.get_connection()?;
+
+        // Add a member to a set using `redis::cmd`
+        let _: () = redis::cmd("SADD")
+            .arg("myset")
+            .arg("member1")
+            .query(&mut con)?;
+
+        // Set expiration for the set member using custom `EXPIREMEMBER` command
+        let _: () = redis::cmd("EXPIREMEMBER")
+            .arg("myset")
+            .arg("member1")
+            .arg(2) // 2 seconds expiration
+            .query(&mut con)?;
+        std::thread::sleep(Duration::from_secs(1));
+
+        let is_member: u8 = redis::cmd("SISMEMBER")
+            .arg("myset")
+            .arg("member1")
+            .query(&mut con)?;
+        assert!(is_member == 1, "The member should still exist in the set at this point in time");
+
+        // Wait for more than 2 seconds
+        std::thread::sleep(Duration::from_secs(2));
+
+        // Check if the set member is deleted
+        let is_member: u8 = redis::cmd("SISMEMBER")
+            .arg("myset")
+            .arg("member1")
+            .query(&mut con)?;
+        assert!(is_member == 0, "The set member should be deleted after expiration");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_expiremember_bulk_set_functionality() -> RedisResult<()> {
+        let client = redis::Client::open("redis://127.0.0.1:34123/")?;
+        let mut con = client.get_connection()?;
+
+        const NUM_MEMBERS: usize = 1000;
+        const MAX_EXPIRATION: u64 = 10; // Max expiration time in seconds
+
+        // Add members to a set with varying expiration times
+        for i in 0..NUM_MEMBERS {
+            let member = format!("member{}", i);
+            let expire_in = (i % MAX_EXPIRATION as usize) as u64 + 1; // Expiration time between 1 to MAX_EXPIRATION seconds
+
+            // Add the member
+            let _: () = redis::cmd("SADD")
+                .arg(format!("myset_bulk{}", expire_in / 2))
+                .arg(&member)
+                .query(&mut con)?;
+
+            // Set the expiration
+            let _: () = redis::cmd("EXPIREMEMBER")
+                .arg(format!("myset_bulk{}", expire_in / 2))
+                .arg(&member)
+                .arg(expire_in)
+                .query(&mut con)?;
+        }
+
+        let start = Instant::now();
+
+        // Check for expirations every second and assert presence or absence of members
+        for sec in 1..MAX_EXPIRATION {
+            while start.elapsed().as_millis() < (sec * 1000 + 500) as u128  {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+
+            for i in 0..NUM_MEMBERS {
+                let member = format!("member{}", i);
+                let expiration_sec = (i % MAX_EXPIRATION as usize) as u64 + 1;
+                let is_member: u8 = redis::cmd("SISMEMBER")
+                    .arg(format!("myset_bulk{}", expiration_sec / 2))
+                    .arg(&member)
+                    .query(&mut con)?;
+
+                if start.elapsed().as_millis() > 1000 * expiration_sec as u128 {
+                    // Member should have expired
+                    assert!(is_member == 0, "Member {} should have expired after {} seconds", member, sec);
+                } else {
+                    // Member should still exist
+                    assert!(is_member == 1, "Member {} should still exist at {} seconds", member, sec);
+                }
+            }
+        }
+
+        Ok(())
+    }
 }

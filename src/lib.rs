@@ -1,9 +1,8 @@
 use crossbeam::queue::ArrayQueue;
 use lazy_static::lazy_static;
-
-
 use redis_module::{
-    redis_module, raw as rawmod, Context, RedisError, RedisResult, RedisString, RedisValue, ThreadSafeContext, KeyType, Status, RedisModuleIO,
+    redis_module, raw as rawmod, Context, RedisError, RedisResult, RedisString, RedisValue,
+    ThreadSafeContext, KeyType, Status, RedisModuleIO,
 };
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread;
@@ -82,8 +81,13 @@ fn expiremember(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         0 => {
             let redis_string_key = ctx.create_string(key.as_bytes());
             let opened_key = ctx.open_key_writable(&redis_string_key);
-            if opened_key.key_type() == KeyType::Hash {
-                let _ = opened_key.hash_del(&member);
+            match opened_key.key_type() {
+                KeyType::Hash => { let _ = opened_key.hash_del(&member); },
+                KeyType::Set => { 
+                    let redis_string_member = ctx.create_string(member.as_bytes());
+                    let _ = ctx.call("SREM", &[&redis_string_key, &redis_string_member]);
+                },
+                _ => return Err(RedisError::Str("ERR key type not supported for 'expiremember' command")),
             }
             expiration_times.remove(&(key.clone() + &member));
             return Ok(RedisValue::Integer(1));
@@ -109,57 +113,57 @@ fn start_expiration_thread() {
     thread::spawn(move || {
         let thread_ctx = ThreadSafeContext::new();
         let mut heap = BinaryHeap::new();
-        let mut members_to_expire = HashMap::new();
         loop {
-            thread::sleep(Duration::from_millis(100));
-            let mut has_data = false;
+            let now = SystemTime::now();
+            let mut members_to_expire = HashMap::new();
+
             while let Some(member) = EXPIRATION_QUEUE.try_pop() {
                 heap.push(Reverse(member));
-                has_data = true;
             }
-            if ! has_data {
-                continue;
-            }
-
-            let now = SystemTime::now();
-            let mut expiration_times = EXPIRATION_TIMES.lock().unwrap();
 
             while let Some(Reverse(member)) = heap.peek() {
                 if member.expire_at > now {
                     break;
                 }
 
-                if let Some(&expiration_time) = expiration_times.get(&(member.key.clone() + &member.member)) {
-                    // the below will be false if the expiration for a field was overridden
+                if let Some(&expiration_time) = EXPIRATION_TIMES.lock().unwrap().get(&(member.key.clone() + &member.member)) {
                     if expiration_time == member.expire_at {
                         members_to_expire.entry(member.key.clone())
                                          .or_insert_with(Vec::new)
-                                         .push(member.member.clone());
-                        expiration_times.remove(&(member.key.clone() + &member.member));
+                                         .push(member.clone());
                     }
                 }
-                heap.pop(); // Remove the processed member
+                heap.pop();
             }
-            drop(expiration_times);
 
             if !members_to_expire.is_empty() {
                 let ctx: redis_module::ContextGuard = thread_ctx.lock();
                 for (key, members) in &members_to_expire {
                     let redis_string_key = ctx.create_string(key.as_bytes());
                     let key = ctx.open_key_writable(&redis_string_key);
-                    if key.key_type() == KeyType::Hash {
-                        for member in members {
-                            key.hash_del(&member);
-                        }
+                    match key.key_type() {
+                        KeyType::Hash => {
+                            for member in members {
+                                key.hash_del(&member.member);
+                            }
+                        },
+                        KeyType::Set => {
+                            for member in members {
+                                let redis_string_member = ctx.create_string(member.member.as_bytes());
+                                let _ = ctx.call("SREM", &[&redis_string_key, &redis_string_member]);
+                            }
+                        },
+                        _ => continue,
                     }
                 }
                 drop(ctx);
             }
+
+            thread::sleep(Duration::from_millis(100));
         }
     });
 }
 
-//////////////////////////////////////////////////////
 #[cfg(not(test))]
 redis_module! {
     name: "expiremember",
