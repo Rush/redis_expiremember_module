@@ -316,4 +316,22 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_expiremember_on_unset_key() -> RedisResult<()> {
+        let client = redis::Client::open("redis://127.0.0.1:34123/")?;
+        let mut con = client.get_connection()?;
+
+        // Attempt to set an expiration on a non-existent field in a hash
+        let result: RedisResult<()> = redis::cmd("EXPIREMEMBER")
+            .arg("nonexistent_hash")
+            .arg("nonexistent_field")
+            .arg(0) // Expiration set to 0 seconds
+            .query(&mut con);
+
+        // The command should complete without errors
+        assert!(result.is_ok(), "Expiremember on a non-existent field should not cause an error");
+
+        Ok(())
+    }
 }
