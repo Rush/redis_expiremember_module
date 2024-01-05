@@ -87,6 +87,8 @@ fn expiremember(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
                     let redis_string_member = ctx.create_string(member.as_bytes());
                     let _ = ctx.call("SREM", &[&redis_string_key, &redis_string_member]);
                 },
+                KeyType::Empty => {
+                }
                 _ => return Err(RedisError::Str("ERR key type not supported for 'expiremember' command")),
             }
             expiration_times.remove(&(key.clone() + &member));
