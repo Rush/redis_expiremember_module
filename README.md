@@ -6,7 +6,7 @@
 
 ## Features
 
-- **Field-Level Expiration**: Set expiration times on individual fields within a Redis hash and a Redis set.
+- **Field-Level Expiration**: Set expiration times on individual fields within a Redis hash, a Redis set and a Redis zset.
 - **Custom Expiration Units**: Support for specifying expiration times in seconds (`s`) or milliseconds (`ms`).
 - **Expiration Override**: Ability to update or override the expiration time for a specific field.
 - **Expiring runs in a separate thread**: The module has been designed to have minimal impact on Redis server's performance and locks Redis's main thread only for actual Redis key delete operations.
@@ -67,6 +67,13 @@ OR
 ```redis
 SADD myset member1 
 EXPIREMEMBER myset field1 10
+```
+
+OR
+
+```redis
+ZADD myzset member1 
+EXPIREMEMBER myzset field1 10
 ```
 
 Sets `field` members in `myset` to expire in 10 seconds

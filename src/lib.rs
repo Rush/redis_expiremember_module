@@ -83,6 +83,10 @@ fn expiremember(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             let opened_key = ctx.open_key_writable(&redis_string_key);
             match opened_key.key_type() {
                 KeyType::Hash => { let _ = opened_key.hash_del(&member); },
+                KeyType::ZSet => { 
+                    let redis_string_member = ctx.create_string(member.as_bytes());
+                    let _ = ctx.call("ZREM", &[&redis_string_key, &redis_string_member]);
+                },
                 KeyType::Set => { 
                     let redis_string_member = ctx.create_string(member.as_bytes());
                     let _ = ctx.call("SREM", &[&redis_string_key, &redis_string_member]);
@@ -147,6 +151,12 @@ fn start_expiration_thread() {
                         KeyType::Hash => {
                             for member in members {
                                 key.hash_del(&member.member);
+                            }
+                        },
+                        KeyType::ZSet => {
+                            for member in members {
+                                let redis_string_member = ctx.create_string(member.member.as_bytes());
+                                let _ = ctx.call("ZREM", &[&redis_string_key, &redis_string_member]);
                             }
                         },
                         KeyType::Set => {

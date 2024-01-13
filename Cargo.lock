@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "redis_expiremember_module"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "crossbeam",
  "ctor",
