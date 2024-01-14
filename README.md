@@ -66,14 +66,14 @@ OR
 
 ```redis
 SADD myset member1 
-EXPIREMEMBER myset field1 10
+EXPIREMEMBER myset member1 10
 ```
 
 OR
 
 ```redis
 ZADD myzset member1 
-EXPIREMEMBER myzset field1 10
+EXPIREMEMBER myzset member1 10
 ```
 
 Sets `field` members in `myset` to expire in 10 seconds
